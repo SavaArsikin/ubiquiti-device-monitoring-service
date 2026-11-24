@@ -1,0 +1,42 @@
+package testutils
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/SavaArsikin/ubiquiti-device-monitoring-service/internal/config"
+)
+
+const ValidEnvFile = `
+LOG_FORMAT=local
+LOG_LEVEL=info
+DATABASE_URL=postgres://admin:admin@127.0.0.1:5432/device_monitor_service?sslmode=disable
+HTTP_ADDR=127.0.0.1:8080
+GRPC_ADDR=127.0.0.1:9090
+API_USERNAME=demo
+API_PASSWORD=demo-password
+POLL_INTERVAL=10s
+PROBE_TIMEOUT=2s
+RETRY_DELAY=250ms
+MAX_RETRIES=1
+FAILURE_THRESHOLD=3
+HISTORY_RETENTION=24h
+MAX_CONCURRENT_PROBES=10
+`
+
+// InitConfig writes a complete temporary config file and initializes config.
+func InitConfig(t testing.TB, envFile string) {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), ".env.monitor")
+
+	if err := os.WriteFile(path, []byte(envFile), 0o600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+
+	_, err := config.Init(path)
+	if err != nil {
+		t.Fatalf("initialize test config: %v", err)
+	}
+}
