@@ -11,7 +11,12 @@ import (
 const ValidEnvFile = `
 LOG_FORMAT=local
 LOG_LEVEL=info
-DATABASE_URL=postgres://admin:admin@127.0.0.1:5432/device_monitor_service?sslmode=disable
+DATABASE_URL=postgres://admin:admin@127.0.0.1:5432/device_monitoring_service_test?sslmode=disable
+DB_MAX_OPEN_CONNS=10
+DB_MAX_IDLE_CONNS=2
+DB_CONN_MAX_LIFETIME=30m
+DB_CONNECT_TIMEOUT=5s
+DB_MIGRATION_TIMEOUT=30s
 HTTP_ADDR=127.0.0.1:8080
 GRPC_ADDR=127.0.0.1:9090
 API_USERNAME=demo

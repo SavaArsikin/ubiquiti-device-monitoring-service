@@ -12,7 +12,8 @@ See [progress.md](progress.md) for the current stage and handoff notes.
 
 - Use `cmd/monitor` and `cmd/device-sim`, with internal packages for config,
   monitoring, persistence, APIs, device clients, and checksum execution.
-  Keep protobuf definitions in `api/` and migrations in `migrations/`.
+  Keep protobuf definitions in `api/`; Goose migrations currently live in
+  `internal/database/migrations/` and are embedded by the database package.
 - Use one shared application/service layer. REST uses chi and standard
   `net/http` clients. gRPC uses `google.golang.org/grpc`, with protobuf code
   generated using Buf.
@@ -38,16 +39,20 @@ See [progress.md](progress.md) for the current stage and handoff notes.
 
 - The monitor exposes Basic Auth-protected REST inventory CRUD at
   `/api/v1/devices` using POST, GET, PATCH, and DELETE, plus
-  `GET /api/v1/status`. DELETE archives rather than hard-deletes. Define
-  individual-resource paths, payloads, and error responses during API work.
+  `GET /api/v1/status`. DELETE archives rather than hard-deletes. Provide
+  explicit restore by existing device ID and a way to list archived devices;
+  their API contracts are not implemented yet. Define individual-resource
+  paths, payloads, and error responses during API work.
 - A read-only gRPC `ListStatuses` returns the same status model as REST. Both
   APIs use shared credentials from the monitor env file; gRPC uses equivalent
   metadata and an interceptor. Never log credentials.
 - Listen on localhost by default, with configurable addresses. Compose
   published ports bind to localhost. Basic Auth is not encryption: remote
   access requires TLS.
-- Inventory stores monitor-assigned device IDs, display names, and health URLs.
-  A valid create or update triggers an immediate probe.
+- Inventory stores monitor-assigned device IDs, display names, and editable
+  health URLs. The ID, not the health URL, identifies a device; restoring by
+  ID preserves its identity and associated history. A valid create or update
+  triggers an immediate probe.
 - Every fake device serves HTTP `GET /health` for capability discovery,
   regardless of its diagnostics protocol. Its JSON response advertises a REST
   diagnostics path and/or gRPC target; prefer gRPC when both are available.
@@ -86,10 +91,12 @@ See [progress.md](progress.md) for the current stage and handoff notes.
   stub with separate component env files. Seed healthy, flaky, and offline
   examples. Keep Go service code OS-neutral; each binary must match its target
   OS.
-- Keep `go test ./...` fast and hardware-free. Provide a Compose-backed
-  integration test path covering persistence, API/auth, protocol discovery,
-  retry/recovery, and checksum failure. Document local run, configuration,
-  credentials handling, and reset in the README.
+- Keep unit tests fast and hardware-free. Current database and repository tests
+  require a locally prepared PostgreSQL test database; separate the integration
+  test path from the hardware-free suite. Extend integration coverage to
+  persistence, API/auth, protocol discovery, retry/recovery, and checksum
+  failure. Document local run, configuration, credentials handling, and reset
+  in the README.
 
 ## Staged sequence and checkpoints
 
@@ -104,9 +111,11 @@ See [progress.md](progress.md) for the current stage and handoff notes.
    **Remaining:** add separate Postgres and simulator env examples and secret
    ignore rules as those components are introduced.
 2. **Persistence and shared service:** add Postgres, Goose migrations, inventory,
-   snapshot/history storage, archival, and the shared application layer.
-   **Checkpoint:** inventory and snapshots survive restart; archival preserves
-   identity and data.
+   snapshot/history storage, archival and restore, and the shared application
+   layer. The devices migration and repository are in place; snapshots,
+   history, and the service layer remain.
+   **Checkpoint:** inventory and snapshots survive restart; archive and restore
+   preserve identity and data.
 3. **Simulator and first probe:** define provisional discovery/diagnostic and
    checksum contracts; build the simulator, checksum stub, and initial
    health/diagnostics path.

@@ -1,4 +1,4 @@
-.PHONY: test-file test-verbose test test-setup
+.PHONY: test-file test-verbose test test-setup db-setup db-setup-podman
 
 test-file:
 		@test -n "$(FILE)" || { echo "Usage: make test-file FILE=path/to/file_test.go" >&2; exit 1; }
@@ -13,3 +13,6 @@ test:
 
 # test-setup:
 # 	NODE_ENV=test go run ./cmd/test-setup
+
+db-setup:
+	go run ./cmd/localsetup
