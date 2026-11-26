@@ -16,7 +16,12 @@ func validConfig() config.Config {
 	return config.Config{
 		LogFormat:           "local",
 		LogLevel:            "info",
-		DatabaseURL:         "postgres://admin:admin@127.0.0.1:5432/device_monitor_service?sslmode=disable",
+		DatabaseURL:         "postgres://admin:admin@127.0.0.1:5432/device_monitoring_service_test?sslmode=disable",
+		DBMaxOpenConns:      10,
+		DBMaxIdleConns:      2,
+		DBConnMaxLifetime:   30 * time.Minute,
+		DBConnectTimeout:    5 * time.Second,
+		DBMigrationTimeout:  30 * time.Second,
 		HTTPAddr:            "127.0.0.1:8080",
 		GRPCAddr:            "127.0.0.1:9090",
 		APIUsername:         "demo",

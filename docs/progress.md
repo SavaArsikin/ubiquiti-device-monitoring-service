@@ -11,9 +11,9 @@ Plan: [implementation-plan.md](implementation-plan.md)
 - [ ] Day 2: Polling, recovery, history, and retention.
 - [ ] Day 2: Compose, tests, and README handoff.
 
-**Current state:** The monitor bootstrap, file-only configuration and logging
-are implemented. The first stage remains open for Postgres and simulator
-configuration examples and secret ignore rules.
+**Current state:** Monitor bootstrap, file-only configuration and logging are
+implemented. Database setup and device inventory persistence are underway;
+snapshots, history, and the shared service layer remain.
 
 ## Update notes
 
@@ -29,13 +29,21 @@ configuration examples and secret ignore rules.
   missing file/key, no ambient fallback and value copies. Logger tests cover
   local and JSON output, level filtering and nested attributes, stripping ANSI
   codes before checking local output.
-- Targeted config and logger tests passed after the latest changes. The earlier
-  full `go test ./... -count=1`, `go vet ./...`, and monitor startup passed.
-  Dependency metadata was tidied; the unused `test-setup` recipe is commented
-  out. `make test-file` runs the containing package, not only the named file.
-- **Next:** add Postgres configuration/example and secret ignore rule alongside
-  persistence setup, then migrations, inventory and snapshot/history storage.
-  Add simulator configuration/example and ignore rule with the simulator.
+- PostgreSQL connection, embedded Goose devices migration, local setup, and a
+  device repository are implemented. The monitor opens the database and applies
+  migrations at startup. The repository supports create, get, list active,
+  update, soft archive, and explicit restore by ID, with optional transactions.
+  A health URL is editable and is not the device identity; restore retains the
+  ID needed to associate future history. Listing archived devices and a restore
+  API remain future work.
+- The user reports that the restore tests pass. Database/repository tests
+  require the prepared local test database; no full-suite result is claimed
+  for the current changes. The earlier config/logger tests, full suite, vet,
+  and bootstrap startup passed before the database work.
+- **Next:** implement snapshot/history persistence and the shared service layer.
+  Add Postgres and simulator env examples and secret ignore rules as those
+  components are completed, and separate database-dependent tests from the
+  hardware-free suite.
 
 When resuming, record the completed stage, decisions and unresolved questions,
 verification performed, and the next concrete step here. Do not record secrets.

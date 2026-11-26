@@ -16,6 +16,11 @@ type Config struct {
 	LogFormat           string        `env:"LOG_FORMAT,required,notEmpty"`
 	LogLevel            string        `env:"LOG_LEVEL,required,notEmpty"`
 	DatabaseURL         string        `env:"DATABASE_URL,required,notEmpty"`
+	DBMaxOpenConns      int           `env:"DB_MAX_OPEN_CONNS,required,notEmpty"`
+	DBMaxIdleConns      int           `env:"DB_MAX_IDLE_CONNS,required,notEmpty"`
+	DBConnMaxLifetime   time.Duration `env:"DB_CONN_MAX_LIFETIME,required,notEmpty"`
+	DBConnectTimeout    time.Duration `env:"DB_CONNECT_TIMEOUT,required,notEmpty"`
+	DBMigrationTimeout  time.Duration `env:"DB_MIGRATION_TIMEOUT,required,notEmpty"`
 	HTTPAddr            string        `env:"HTTP_ADDR,required,notEmpty"`
 	GRPCAddr            string        `env:"GRPC_ADDR,required,notEmpty"`
 	APIUsername         string        `env:"API_USERNAME,required,notEmpty"`
@@ -27,7 +32,6 @@ type Config struct {
 	FailureThreshold    int           `env:"FAILURE_THRESHOLD,required"`
 	HistoryRetention    time.Duration `env:"HISTORY_RETENTION,required,notEmpty"`
 	MaxConcurrentProbes int           `env:"MAX_CONCURRENT_PROBES,required"`
-	// LogColor            bool          `env:"LOG_COLOR,required"`
 }
 
 // global config should be immutable after init
@@ -114,6 +118,23 @@ func (cfg Config) Validate() error {
 		if dbUrl.Path == "" || dbUrl.Path == "/" {
 			problems = append(problems, errors.New("DATABASE_URL must have a valid database name in the path"))
 		}
+	}
+
+	if cfg.DBMaxOpenConns < 1 {
+		problems = append(problems, errors.New("DB_MAX_OPEN_CONNS must be at least 1"))
+	}
+	if cfg.DBMaxIdleConns < 0 || cfg.DBMaxIdleConns > cfg.DBMaxOpenConns {
+		problems = append(problems, errors.New("DB_MAX_IDLE_CONNS must be between 0 and DB_MAX_OPEN_CONNS"))
+	}
+	if cfg.DBConnMaxLifetime <= 0 {
+		problems = append(problems, errors.New("DB_CONN_MAX_LIFETIME must be positive"))
+	}
+	if cfg.DBConnectTimeout <= 0 {
+		problems = append(problems, errors.New("DB_CONNECT_TIMEOUT must be positive"))
+	}
+
+	if cfg.DBMigrationTimeout <= 0 {
+		problems = append(problems, errors.New("DB_MIGRATION_TIMEOUT must be positive"))
 	}
 
 	if err := validateListenAddr("HTTP_ADDR", cfg.HTTPAddr); err != nil {
