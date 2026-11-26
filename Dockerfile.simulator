@@ -1,0 +1,23 @@
+
+FROM golang:1.27.2-alpine AS build
+
+WORKDIR /src
+COPY go.mod go.sum ./
+COPY vendor ./vendor
+
+COPY internal/deviceprotocol ./internal/deviceprotocol
+COPY internal/simulator ./internal/simulator
+COPY cmd/simulator ./cmd/simulator
+COPY cmd/checksumstub ./cmd/checksumstub
+
+RUN CGO_ENABLED=0 go build -mod=vendor -o /out/simulator ./cmd/simulator \
+    && CGO_ENABLED=0 go build -mod=vendor -o /out/checksumstub ./cmd/checksumstub
+
+FROM alpine:3.22
+
+WORKDIR /app
+COPY --from=build /out/simulator /app/simulator
+COPY --from=build /out/checksumstub /app/checksumstub
+
+USER 10001:10001
+ENTRYPOINT ["/app/simulator"]

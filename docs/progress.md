@@ -11,9 +11,9 @@ Plan: [implementation-plan.md](implementation-plan.md)
 - [ ] Day 2: Polling, recovery, history, and retention.
 - [ ] Day 2: Compose, tests, and README handoff.
 
-**Current state:** Monitor bootstrap, file-only configuration and logging are
-implemented. Database setup and device inventory persistence are underway;
-snapshots, history, and the shared service layer remain.
+**Current state:** Monitor bootstrap, inventory service, persistence and a REST
+simulator are implemented. The monitor currently initializes its database and
+exits; APIs and polling are not connected.
 
 ## Update notes
 
@@ -29,21 +29,27 @@ snapshots, history, and the shared service layer remain.
   missing file/key, no ambient fallback and value copies. Logger tests cover
   local and JSON output, level filtering and nested attributes, stripping ANSI
   codes before checking local output.
-- PostgreSQL connection, embedded Goose devices migration, local setup, and a
-  device repository are implemented. The monitor opens the database and applies
-  migrations at startup. The repository supports create, get, list active,
-  update, soft archive, and explicit restore by ID, with optional transactions.
-  A health URL is editable and is not the device identity; restore retains the
-  ID needed to associate future history. Listing archived devices and a restore
-  API remain future work.
-- The user reports that the restore tests pass. Database/repository tests
-  require the prepared local test database; no full-suite result is claimed
-  for the current changes. The earlier config/logger tests, full suite, vet,
-  and bootstrap startup passed before the database work.
-- **Next:** implement snapshot/history persistence and the shared service layer.
-  Add Postgres and simulator env examples and secret ignore rules as those
-  components are completed, and separate database-dependent tests from the
-  hardware-free suite.
+- PostgreSQL connection, local setup, embedded Goose migrations and repositories
+  for inventory, current status and history are implemented. The inventory
+  service supports create, get, active/archived lists, update, archive and
+  restore; creation inserts inventory and an initial unknown status in one
+  service-owned transaction. Business validation belongs to the service; the
+  schema uses structural constraints. Health URLs are editable, not identity;
+  restoration uses the existing ID. Restore and listing APIs remain pending.
+- A REST simulator exposes discovery and diagnostics with independently
+  configurable behaviors and a bounded one-shot external checksum stub. The
+  REST probe client exists but is not wired to monitor polling. Compose runs
+  PostgreSQL and healthy/flaky simulators; its simulator build uses vendored
+  dependencies. The user reports healthy/flaky startup and HTTP checks work.
+- The user reports service and repository tests pass. Service tests use static
+  stubs and sqlmock; database/repository tests need the prepared test database
+  and truncate shared tables, so use `make test` for serial packages. No full
+  suite result is claimed for the latest changes. Automated simulator tests are
+  still pending.
+- **Next:** integrate discovery and polling with the service and repositories,
+  add simulator tests, then implement the REST/gRPC APIs and gRPC simulator.
+  Complete separate Postgres/simulator env examples and secret ignore rules,
+  scheduling, retention and full Compose integration.
 
 When resuming, record the completed stage, decisions and unresolved questions,
 verification performed, and the next concrete step here. Do not record secrets.

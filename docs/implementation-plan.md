@@ -10,7 +10,7 @@ See [progress.md](progress.md) for the current stage and handoff notes.
 
 ## Architecture and decisions
 
-- Use `cmd/monitor` and `cmd/device-sim`, with internal packages for config,
+- Use `cmd/monitor` and `cmd/simulator`, with internal packages for config,
   monitoring, persistence, APIs, device clients, and checksum execution.
   Keep protobuf definitions in `api/`; Goose migrations currently live in
   `internal/database/migrations/` and are embedded by the database package.
@@ -19,21 +19,16 @@ See [progress.md](progress.md) for the current stage and handoff notes.
   generated using Buf.
 - Use `database/sql` with the pgx stdlib driver, explicit SQL, and versioned
   Goose SQL migrations; no ORM.
-- Read configuration directly from separate monitor, Postgres, and simulator
-  env files, not inherited ambient environment variables. Annotate config
-  structs with `env` tags using `github.com/caarlos0/env/v11`. Read the
-  component file with `godotenv.Read(path)` and pass the resulting map to
-  `env.ParseWithOptions(&cfg, env.Options{Environment: values, RequiredIfNoDef: true})`;
-  do not call `env.Parse` or read ambient OS environment. Unknown keys are
-  ignored. Validate semantics such as positive durations and valid addresses.
-  Every required key must be present, non-empty, and valid; the application must
-  not supply defaults for missing keys. Initialize global configuration before
-  starting goroutines; `Init` and `Get` return values, not mutable references.
-  Track complete `.env.*.example` templates and ignore real secret files.
-  Finalize exact keys
-  and validation in the config stage. Example values may express planned
-  defaults, but are still required at runtime. Never put real credentials in
-  documentation.
+- Read monitor and simulator configuration from their own env files, not
+  inherited ambient environment variables. Config structs use `env` tags
+  with `github.com/caarlos0/env/v11`; `godotenv.Read` supplies the map to
+  `env.ParseWithOptions`. Unknown keys are ignored. Validate semantics such as
+  positive durations and valid addresses. Required values must be present and
+  valid, with no runtime defaults; simulator `CHECKSUM_ARGS` may be empty.
+  Initialize global monitor configuration before starting goroutines; `Init`
+  and `Get` return values, not mutable references.
+  Complete component examples and secret ignore rules remain to be finished;
+  never put real credentials in documentation.
 
 ## Provisional contracts
 
@@ -87,10 +82,11 @@ See [progress.md](progress.md) for the current stage and handoff notes.
   standard JSON handler. Log lifecycle, retries, failures, recovery/state
   transitions, and checksum errors as structured events, without per-healthy-
   poll noise or credentials.
-- Compose runs Postgres, monitor, fake REST/gRPC devices, and the checksum
-  stub with separate component env files. Seed healthy, flaky, and offline
-  examples. Keep Go service code OS-neutral; each binary must match its target
-  OS.
+- Compose currently runs Postgres and healthy/flaky REST simulators; the
+  checksum stub is packaged inside each simulator image. The monitor, gRPC
+  devices, offline example, and separate Postgres env configuration remain to
+  be wired in. Keep Go service code OS-neutral; each binary must match its
+  target OS.
 - Keep unit tests fast and hardware-free. Current database and repository tests
   require a locally prepared PostgreSQL test database; separate the integration
   test path from the hardware-free suite. Extend integration coverage to
@@ -112,13 +108,14 @@ See [progress.md](progress.md) for the current stage and handoff notes.
    ignore rules as those components are introduced.
 2. **Persistence and shared service:** add Postgres, Goose migrations, inventory,
    snapshot/history storage, archival and restore, and the shared application
-   layer. The devices migration and repository are in place; snapshots,
-   history, and the service layer remain.
+   layer. Device, current status and history repositories and the inventory
+   service are in place; connecting probes and polling remains.
    **Checkpoint:** inventory and snapshots survive restart; archive and restore
    preserve identity and data.
 3. **Simulator and first probe:** define provisional discovery/diagnostic and
    checksum contracts; build the simulator, checksum stub, and initial
-   health/diagnostics path.
+   health/diagnostics path. REST simulator and client are implemented; monitor
+   integration and automated simulator tests remain.
    **Checkpoint:** a simulated device can be discovered and probed, including
    checksum success and a distinct checksum failure.
 
