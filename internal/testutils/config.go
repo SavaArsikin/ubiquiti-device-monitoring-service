@@ -28,6 +28,7 @@ MAX_RETRIES=1
 FAILURE_THRESHOLD=3
 HISTORY_RETENTION=24h
 MAX_CONCURRENT_PROBES=10
+SHUTDOWN_TIMEOUT=10s
 `
 
 // InitConfig writes a complete temporary config file and initializes config.

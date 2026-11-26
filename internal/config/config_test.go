@@ -33,6 +33,7 @@ func validConfig() config.Config {
 		FailureThreshold:    3,
 		HistoryRetention:    24 * time.Hour,
 		MaxConcurrentProbes: 10,
+		ShutdownTimeout:     10 * time.Second,
 	}
 }
 

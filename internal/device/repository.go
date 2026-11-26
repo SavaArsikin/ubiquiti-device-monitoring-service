@@ -133,6 +133,43 @@ func (r *DeviceRepository) ListActive(ctx context.Context, tx *sql.Tx) ([]*Devic
 	return devices, nil
 }
 
+func (r *DeviceRepository) ListArchived(
+	ctx context.Context,
+	tx *sql.Tx,
+) ([]*Device, error) {
+	var db queryExecutor = r.db
+	if tx != nil {
+		db = tx
+	}
+
+	query := `
+		SELECT ` + deviceColumns + `
+		FROM devices
+		WHERE archived_at IS NOT NULL
+		ORDER BY updated_at, id
+	`
+
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("list archived devices: %w", err)
+	}
+	defer rows.Close()
+
+	devices := make([]*Device, 0)
+	for rows.Next() {
+		device, err := scanDevice(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan archived device: %w", err)
+		}
+		devices = append(devices, &device)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate archived devices: %w", err)
+	}
+
+	return devices, nil
+}
+
 func (r *DeviceRepository) Update(
 	ctx context.Context,
 	inputDevice *Device,

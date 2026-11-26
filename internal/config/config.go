@@ -32,6 +32,7 @@ type Config struct {
 	FailureThreshold    int           `env:"FAILURE_THRESHOLD,required"`
 	HistoryRetention    time.Duration `env:"HISTORY_RETENTION,required,notEmpty"`
 	MaxConcurrentProbes int           `env:"MAX_CONCURRENT_PROBES,required"`
+	ShutdownTimeout     time.Duration `env:"SHUTDOWN_TIMEOUT,required,notEmpty"`
 }
 
 // global config should be immutable after init
@@ -164,6 +165,9 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.MaxConcurrentProbes < 1 {
 		problems = append(problems, errors.New("MAX_CONCURRENT_PROBES must be at least 1"))
+	}
+	if cfg.ShutdownTimeout <= 0 {
+		problems = append(problems, errors.New("SHUTDOWN_TIMEOUT must be positive"))
 	}
 
 	return errors.Join(problems...)
