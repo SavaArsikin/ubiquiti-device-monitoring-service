@@ -96,6 +96,26 @@ func run() (err error) {
 		monitoringService,
 	)
 
+	apiHandler := rest.NewHandler(
+		deviceService,
+		monitoringService,
+		applicationConfig.APIUsername,
+		applicationConfig.APIPassword,
+	)
+
+	apiServer = &http.Server{
+		Addr:              applicationConfig.HTTPAddr,
+		Handler:           apiHandler,
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+
+	httpServerErrors := make(chan error, 1)
+	go func() {
+		slog.Info("listening REST API", "address", applicationConfig.HTTPAddr)
+		httpServerErrors <- apiServer.ListenAndServe()
+	}()
+
 	signalContext, stopSignalHandling := signal.NotifyContext(
 		context.Background(),
 		os.Interrupt,
@@ -130,6 +150,9 @@ func run() (err error) {
 
 	case <-schedulerDone:
 		return schedulerError
+
+	case serverError := <-httpServerErrors:
+		return fmt.Errorf("REST API server stopped: %w", serverError)
 	}
 }
 
@@ -153,23 +176,24 @@ func shutdownMonitor(
 		cancelScheduler()
 	}
 
-	// Buffer the result so cleanup can report completion even if this
-	// function has already returned because its deadline expired.
-	cleanupFinished := make(chan error, 1)
+	if apiServer != nil {
+		// Shutdown stops accepting requests and waits for active handlers.
+		if err := apiServer.Shutdown(shutdownContext); err != nil {
+			shutdownError := fmt.Errorf("shut down REST API server: %w", err)
 
-	go func() {
-		// Startup failures may happen before the scheduler is created.
-		if schedulerFinished != nil {
-			<-schedulerFinished
+			// Close connections, but do not assume their handlers have exited.
+			if closeError := apiServer.Close(); closeError != nil {
+				shutdownError = errors.Join(
+					shutdownError,
+					fmt.Errorf("force-close REST API server: %w", closeError),
+				)
+			}
+
+			// A handler may still use the pool. Return an error and let
+			// the process exit rather than explicitly closing it here.
+			return shutdownError
 		}
-
-		// Do not close the database while scheduler workers still use it.
-		if err := databasePool.Close(); err != nil {
-			cleanupFinished <- errors.New("close database connection pool failed")
-			return
-		}
-
-		cleanupFinished <- nil
+	}
 	}()
 
 	select {

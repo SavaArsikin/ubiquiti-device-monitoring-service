@@ -23,7 +23,6 @@ func validConfig() config.Config {
 		DBConnectTimeout:    5 * time.Second,
 		DBMigrationTimeout:  30 * time.Second,
 		HTTPAddr:            "127.0.0.1:8080",
-		GRPCAddr:            "127.0.0.1:9090",
 		APIUsername:         "demo",
 		APIPassword:         "demo-password",
 		PollInterval:        10 * time.Second,
@@ -31,7 +30,6 @@ func validConfig() config.Config {
 		RetryDelay:          250 * time.Millisecond,
 		MaxRetries:          1,
 		FailureThreshold:    3,
-		HistoryRetention:    24 * time.Hour,
 		MaxConcurrentProbes: 10,
 		ShutdownTimeout:     10 * time.Second,
 	}
@@ -200,12 +198,6 @@ func TestConfigValidate(t *testing.T) {
 			name: "invalid failure threshold",
 			change: func(c *config.Config) {
 				c.FailureThreshold = 0
-			},
-		},
-		{
-			name: "non-positive history retention",
-			change: func(c *config.Config) {
-				c.HistoryRetention = 0
 			},
 		},
 		{
