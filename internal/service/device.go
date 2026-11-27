@@ -13,6 +13,13 @@ import (
 	"github.com/SavaArsikin/ubiquiti-device-monitoring-service/internal/devicestatus"
 )
 
+var (
+	ErrInvalidDeviceID    = errors.New("device ID must be a valid UUID")
+	ErrDeviceRequired     = errors.New("device is required")
+	ErrDeviceNameRequired = errors.New("device name is required")
+	ErrInvalidHealthURL   = errors.New("health URL must be an HTTP or HTTPS URL with a host")
+)
+
 type deviceRepository interface {
 	Create(context.Context, *device.Device, *sql.Tx) (*device.Device, error)
 	Get(context.Context, string, *sql.Tx) (*device.Device, error)
@@ -55,7 +62,7 @@ var deviceIDPattern = regexp.MustCompile(
 
 func validateDeviceID(deviceID string) error {
 	if !deviceIDPattern.MatchString(deviceID) {
-		return errors.New("device ID must be a valid UUID")
+		return ErrInvalidDeviceID
 	}
 
 	return nil
@@ -63,7 +70,7 @@ func validateDeviceID(deviceID string) error {
 
 func prepareDeviceInput(inputDevice *device.Device) (*device.Device, error) {
 	if inputDevice == nil {
-		return nil, errors.New("device is required")
+		return nil, ErrDeviceRequired
 	}
 
 	// Validate and normalize a copy so callers keep their original value.
@@ -72,14 +79,14 @@ func prepareDeviceInput(inputDevice *device.Device) (*device.Device, error) {
 	preparedDevice.HealthURL = strings.TrimSpace(preparedDevice.HealthURL)
 
 	if preparedDevice.Name == "" {
-		return nil, errors.New("device name is required")
+		return nil, ErrDeviceNameRequired
 	}
 
 	parsedHealthURL, err := url.Parse(preparedDevice.HealthURL)
 	if err != nil ||
 		parsedHealthURL.Hostname() == "" ||
 		(parsedHealthURL.Scheme != "http" && parsedHealthURL.Scheme != "https") {
-		return nil, errors.New("health URL must be an HTTP or HTTPS URL with a host")
+		return nil, ErrInvalidHealthURL
 	}
 
 	return &preparedDevice, nil

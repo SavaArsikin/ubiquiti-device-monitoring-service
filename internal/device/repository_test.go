@@ -926,14 +926,19 @@ func TestRestoreDevice(t *testing.T) {
 		testutils.TruncateTables(t, db)
 		existing := testutils.InsertNewDeviceIntoDb(t, db, nil)
 
-		archivedAt := time.Now().UTC()
+		archivedAt := time.Date(2020, time.January, 2, 0, 0, 0, 0, time.UTC)
+		createdAt := archivedAt.Add(-time.Hour)
+
 		_, err := db.ExecContext(t.Context(), `
-			UPDATE devices SET archived_at = $2, updated_at = $2
+			UPDATE devices
+			SET created_at = $3, archived_at = $2, updated_at = $2
 			WHERE id = $1
-		`, existing.ID, archivedAt)
+		`, existing.ID, archivedAt, createdAt)
 		if err != nil {
 			t.Fatalf("archive test device: %v", err)
 		}
+
+		existing.CreatedAt = createdAt
 		existing.ArchivedAt = &archivedAt
 		existing.UpdatedAt = archivedAt
 
@@ -989,14 +994,19 @@ func TestRestoreDevice(t *testing.T) {
 			testutils.TruncateTables(t, db)
 			existing := testutils.InsertNewDeviceIntoDb(t, db, nil)
 
-			archivedAt := time.Now().UTC()
+			archivedAt := time.Date(2020, time.January, 2, 0, 0, 0, 0, time.UTC)
+			createdAt := archivedAt.Add(-time.Hour)
+
 			_, err := db.ExecContext(t.Context(), `
-				UPDATE devices SET archived_at = $2, updated_at = $2
+				UPDATE devices
+				SET created_at = $3, archived_at = $2, updated_at = $2
 				WHERE id = $1
-			`, existing.ID, archivedAt)
+			`, existing.ID, archivedAt, createdAt)
 			if err != nil {
 				t.Fatalf("archive test device: %v", err)
 			}
+
+			existing.CreatedAt = createdAt
 			existing.ArchivedAt = &archivedAt
 			existing.UpdatedAt = archivedAt
 
