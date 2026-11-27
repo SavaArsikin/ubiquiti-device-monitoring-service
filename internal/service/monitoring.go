@@ -34,6 +34,10 @@ type monitoringStatusRepository interface {
 		*devicestatus.DeviceStatus,
 		*sql.Tx,
 	) (*devicestatus.DeviceStatus, error)
+	ListActive(
+		context.Context,
+		*sql.Tx,
+	) ([]*devicestatus.DeviceStatus, error)
 }
 
 type monitoringHistoryRepository interface {
@@ -51,6 +55,12 @@ type diagnosticsClient interface {
 	) (*deviceprotocol.Capabilities, error)
 
 	FetchDiagnostics(
+		context.Context,
+		string,
+		string,
+	) (*deviceprotocol.Diagnostics, error)
+
+	FetchGRPCDiagnostics(
 		context.Context,
 		string,
 		string,
@@ -271,20 +281,29 @@ func (monitoringService *MonitoringService) probeDeviceOnce(
 
 	// Do not silently use REST when the device advertises gRPC; that would
 	// hide the fact that the advertised protocol is not implemented yet.
-	if capabilities.GRPCTarget != "" {
-		result.category = "unsupported_protocol"
-		return result
-	}
-	if capabilities.RESTDiagnosticsPath == "" {
+	var diagnostics *deviceprotocol.Diagnostics
+
+	switch {
+	case capabilities.GRPCTarget != "":
+		// Prefer gRPC when both transports are advertised.
+		diagnostics, err = monitoringService.client.FetchGRPCDiagnostics(
+			ctx,
+			healthURL,
+			capabilities.GRPCTarget,
+		)
+
+	case capabilities.RESTDiagnosticsPath != "":
+		diagnostics, err = monitoringService.client.FetchDiagnostics(
+			ctx,
+			healthURL,
+			capabilities.RESTDiagnosticsPath,
+		)
+
+	default:
 		result.category = "unsupported_protocol"
 		return result
 	}
 
-	diagnostics, err := monitoringService.client.FetchDiagnostics(
-		ctx,
-		healthURL,
-		capabilities.RESTDiagnosticsPath,
-	)
 	result.diagnostics = diagnostics
 
 	if diagnostics != nil {
@@ -397,4 +416,41 @@ func waitForRetry(ctx context.Context, retryDelay time.Duration) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// ListStatuses returns the latest status snapshot for every active device.
+// Archived devices are excluded because they are no longer being monitored.
+func (monitoringService *MonitoringService) ListStatuses(
+	requestContext context.Context,
+) ([]*devicestatus.DeviceStatus, error) {
+	deviceStatuses, err := monitoringService.statuses.ListActive(
+		requestContext,
+		nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list active device statuses: %w", err)
+	}
+
+	return deviceStatuses, nil
+}
+
+// GetStatus returns the latest status snapshot for the requested device.
+func (monitoringService *MonitoringService) GetStatus(
+	requestContext context.Context,
+	deviceID string,
+) (*devicestatus.DeviceStatus, error) {
+	if err := validateDeviceID(deviceID); err != nil {
+		return nil, err
+	}
+
+	deviceStatus, err := monitoringService.statuses.Get(
+		requestContext,
+		deviceID,
+		nil,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get device status: %w", err)
+	}
+
+	return deviceStatus, nil
 }

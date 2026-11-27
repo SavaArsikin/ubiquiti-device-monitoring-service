@@ -29,6 +29,12 @@ type monitoringStatusRepositoryStub struct {
 	getTx       *sql.Tx
 	updateTx    *sql.Tx
 	updateInput *devicestatus.DeviceStatus
+
+	listResult  []*devicestatus.DeviceStatus
+	listErr     error
+	listCalls   int
+	listTx      *sql.Tx
+	listContext context.Context
 }
 
 func (repositoryStub *monitoringStatusRepositoryStub) Get(
@@ -57,6 +63,17 @@ func (repositoryStub *monitoringStatusRepositoryStub) Update(
 	}
 
 	return repositoryStub.updateResult, repositoryStub.updateErr
+}
+
+func (repositoryStub *monitoringStatusRepositoryStub) ListActive(
+	requestContext context.Context,
+	transaction *sql.Tx,
+) ([]*devicestatus.DeviceStatus, error) {
+	repositoryStub.listCalls++
+	repositoryStub.listContext = requestContext
+	repositoryStub.listTx = transaction
+
+	return repositoryStub.listResult, repositoryStub.listErr
 }
 
 type monitoringHistoryRepositoryStub struct {
@@ -91,6 +108,11 @@ type monitoringDiagnosticsClientStub struct {
 
 	discoverCalls    int
 	diagnosticsCalls int
+
+	grpcDiagnostics      *deviceprotocol.Diagnostics
+	grpcDiagnosticsErr   error
+	grpcDiagnosticsCalls int
+	grpcTarget           string
 }
 
 func (clientStub *monitoringDiagnosticsClientStub) Discover(
@@ -108,6 +130,17 @@ func (clientStub *monitoringDiagnosticsClientStub) FetchDiagnostics(
 ) (*deviceprotocol.Diagnostics, error) {
 	clientStub.diagnosticsCalls++
 	return clientStub.diagnostics, clientStub.diagnosticsErr
+}
+
+func (clientStub *monitoringDiagnosticsClientStub) FetchGRPCDiagnostics(
+	_ context.Context,
+	_ string,
+	grpcTarget string,
+) (*deviceprotocol.Diagnostics, error) {
+	clientStub.grpcDiagnosticsCalls++
+	clientStub.grpcTarget = grpcTarget
+
+	return clientStub.grpcDiagnostics, clientStub.grpcDiagnosticsErr
 }
 
 func newMonitoringServiceTestFixture(
@@ -171,7 +204,6 @@ func initializeMonitoringTestConfig(
 	DB_CONNECT_TIMEOUT=5s
 	DB_MIGRATION_TIMEOUT=5s
 	HTTP_ADDR=127.0.0.1:8080
-	GRPC_ADDR=127.0.0.1:9090
 	API_USERNAME=test
 	API_PASSWORD=test
 	POLL_INTERVAL=10s
@@ -179,7 +211,6 @@ func initializeMonitoringTestConfig(
 	RETRY_DELAY=1ms
 	MAX_RETRIES=%d
 	FAILURE_THRESHOLD=%d
-	HISTORY_RETENTION=24h
 	MAX_CONCURRENT_PROBES=2
 	SHUTDOWN_TIMEOUT=10s
 	`, maxRetries, failureThreshold)
@@ -502,4 +533,257 @@ func TestPollDeviceRollsBackWhenHistoryInsertFails(t *testing.T) {
 	}
 }
 
-// var _ = probe.ErrInvalidDiagnostics
+func TestListStatuses(t *testing.T) {
+	repositoryError := errors.New("list statuses failed")
+
+	for _, testCase := range []struct {
+		name            string
+		statuses        []*devicestatus.DeviceStatus
+		repositoryError error
+	}{
+		{
+			name: "returns active statuses",
+			statuses: []*devicestatus.DeviceStatus{
+				{
+					DeviceID:           testDeviceID,
+					ReachabilityStatus: devicestatus.ReachabilityReachable,
+				},
+			},
+		},
+		{
+			name:     "returns empty list",
+			statuses: []*devicestatus.DeviceStatus{},
+		},
+		{
+			name:            "returns repository error",
+			repositoryError: repositoryError,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			db, _ := openMockDatabase(t)
+			statusRepository := &monitoringStatusRepositoryStub{
+				listResult: testCase.statuses,
+				listErr:    testCase.repositoryError,
+			}
+			monitoringService := service.NewMonitoringService(
+				db,
+				&deviceRepositoryStub{},
+				statusRepository,
+				&monitoringHistoryRepositoryStub{},
+				&monitoringDiagnosticsClientStub{},
+			)
+
+			requestContext := t.Context()
+			gotStatuses, err := monitoringService.ListStatuses(requestContext)
+
+			if statusRepository.listCalls != 1 {
+				t.Fatalf("expected one ListActive call, got %d", statusRepository.listCalls)
+			}
+			if statusRepository.listContext != requestContext {
+				t.Error("expected request context to be passed to the repository")
+			}
+			if statusRepository.listTx != nil {
+				t.Error("expected status listing not to use a transaction")
+			}
+
+			if testCase.repositoryError != nil {
+				if !errors.Is(err, testCase.repositoryError) {
+					t.Fatalf("expected repository error, got: %v", err)
+				}
+				if gotStatuses != nil {
+					t.Errorf("expected nil statuses on error, got %+v", gotStatuses)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("list statuses: %v", err)
+			}
+			if len(gotStatuses) != len(testCase.statuses) {
+				t.Fatalf("expected %d statuses, got %d",
+					len(testCase.statuses), len(gotStatuses))
+			}
+			if len(gotStatuses) > 0 &&
+				gotStatuses[0].DeviceID != testCase.statuses[0].DeviceID {
+				t.Errorf("expected device ID %q, got %q",
+					testCase.statuses[0].DeviceID, gotStatuses[0].DeviceID)
+			}
+		})
+	}
+}
+
+func TestGetStatus(t *testing.T) {
+	repositoryError := errors.New("get status failed")
+	expectedStatus := &devicestatus.DeviceStatus{
+		DeviceID:           testDeviceID,
+		ReachabilityStatus: devicestatus.ReachabilityReachable,
+	}
+
+	for _, testCase := range []struct {
+		name             string
+		deviceID         string
+		repositoryResult *devicestatus.DeviceStatus
+		repositoryError  error
+		wantError        string
+	}{
+		{
+			name:             "returns status",
+			deviceID:         testDeviceID,
+			repositoryResult: expectedStatus,
+		},
+		{
+			name:      "rejects invalid device ID",
+			deviceID:  "not-a-uuid",
+			wantError: "device ID must be a valid UUID",
+		},
+		{
+			name:            "returns repository error",
+			deviceID:        testDeviceID,
+			repositoryError: repositoryError,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			db, _ := openMockDatabase(t)
+			statusRepository := &monitoringStatusRepositoryStub{
+				getResult: testCase.repositoryResult,
+				getErr:    testCase.repositoryError,
+			}
+			monitoringService := service.NewMonitoringService(
+				db,
+				&deviceRepositoryStub{},
+				statusRepository,
+				&monitoringHistoryRepositoryStub{},
+				&monitoringDiagnosticsClientStub{},
+			)
+
+			requestContext := t.Context()
+			gotStatus, err := monitoringService.GetStatus(
+				requestContext,
+				testCase.deviceID,
+			)
+
+			if testCase.wantError != "" {
+				if err == nil || err.Error() != testCase.wantError {
+					t.Fatalf("expected error %q, got: %v", testCase.wantError, err)
+				}
+				if gotStatus != nil {
+					t.Errorf("expected nil status, got %+v", gotStatus)
+				}
+				if statusRepository.getCalls != 0 {
+					t.Error("repository should not be called for an invalid ID")
+				}
+				return
+			}
+
+			if testCase.repositoryError != nil {
+				if !errors.Is(err, testCase.repositoryError) {
+					t.Fatalf("expected repository error, got: %v", err)
+				}
+				if gotStatus != nil {
+					t.Errorf("expected nil status on error, got %+v", gotStatus)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("get status: %v", err)
+				}
+				if gotStatus == nil || gotStatus.DeviceID != expectedStatus.DeviceID {
+					t.Errorf("expected status for %q, got %+v",
+						expectedStatus.DeviceID, gotStatus)
+				}
+			}
+
+			if statusRepository.getCalls != 1 {
+				t.Fatalf("expected one Get call, got %d", statusRepository.getCalls)
+			}
+			if statusRepository.getID != testCase.deviceID {
+				t.Errorf("expected device ID %q, got %q",
+					testCase.deviceID, statusRepository.getID)
+			}
+			if statusRepository.getTx != nil {
+				t.Error("expected status lookup not to use a transaction")
+			}
+		})
+	}
+}
+
+func TestPollDevicePrefersGRPC(t *testing.T) {
+	checksum := "test-checksum"
+
+	initialStatus := &devicestatus.DeviceStatus{
+		DeviceID:           testDeviceID,
+		ReachabilityStatus: devicestatus.ReachabilityUnknown,
+	}
+
+	diagnosticsClient := &monitoringDiagnosticsClientStub{
+		capabilities: &deviceprotocol.Capabilities{
+			RESTDiagnosticsPath: "/diagnostics",
+			GRPCTarget:          "localhost:9091",
+		},
+		grpcDiagnostics: &deviceprotocol.Diagnostics{
+			HardwareVersion: "hardware-1",
+			SoftwareVersion: "software-1",
+			FirmwareVersion: "firmware-1",
+			Status:          "healthy",
+			Checksum:        &checksum,
+		},
+	}
+
+	_, databaseMock, monitoringService, statusRepository, historyRepository :=
+		newMonitoringServiceTestFixture(t, 0, 3, initialStatus, diagnosticsClient)
+
+	databaseMock.ExpectBegin()
+	databaseMock.ExpectCommit()
+
+	statusRepository.updateResult = &devicestatus.DeviceStatus{
+		DeviceID:           testDeviceID,
+		ReachabilityStatus: devicestatus.ReachabilityReachable,
+	}
+
+	_, err := monitoringService.PollDevice(context.Background(), testDeviceID)
+	if err != nil {
+		t.Fatalf("poll device: %v", err)
+	}
+
+	if diagnosticsClient.grpcDiagnosticsCalls != 1 {
+		t.Errorf(
+			"expected one gRPC diagnostics call, got %d",
+			diagnosticsClient.grpcDiagnosticsCalls,
+		)
+	}
+
+	if diagnosticsClient.grpcTarget != "localhost:9091" {
+		t.Errorf("unexpected gRPC target: %q", diagnosticsClient.grpcTarget)
+	}
+
+	if diagnosticsClient.diagnosticsCalls != 0 {
+		t.Errorf(
+			"expected no REST diagnostics calls, got %d",
+			diagnosticsClient.diagnosticsCalls,
+		)
+	}
+
+	if statusRepository.updateInput == nil {
+		t.Fatal("expected an updated status")
+	}
+
+	if !statusRepository.updateInput.DiagnosticsComplete {
+		t.Error("expected complete diagnostics")
+	}
+
+	if statusRepository.updateInput.ReachabilityStatus != devicestatus.ReachabilityReachable {
+		t.Errorf(
+			"expected reachable status, got %q",
+			statusRepository.updateInput.ReachabilityStatus,
+		)
+	}
+
+	if historyRepository.createInput == nil ||
+		historyRepository.createInput.Checksum == nil ||
+		*historyRepository.createInput.Checksum != checksum {
+		t.Errorf("unexpected history entry: %+v", historyRepository.createInput)
+	}
+
+	if err := databaseMock.ExpectationsWereMet(); err != nil {
+		t.Errorf("database expectations: %v", err)
+	}
+}

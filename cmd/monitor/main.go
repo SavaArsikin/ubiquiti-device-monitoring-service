@@ -10,7 +10,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/SavaArsikin/ubiquiti-device-monitoring-service/internal/api/rest"
 	"github.com/SavaArsikin/ubiquiti-device-monitoring-service/internal/config"
 	"github.com/SavaArsikin/ubiquiti-device-monitoring-service/internal/database"
 	"github.com/SavaArsikin/ubiquiti-device-monitoring-service/internal/device"
@@ -28,7 +30,8 @@ func main() {
 }
 
 func run() (err error) {
-	if _, err := config.Init(".env.monitor"); err != nil {
+	applicationConfig, err := config.Init(".env.monitor")
+	if err != nil {
 		return fmt.Errorf("initialize config: %w", err)
 	}
 
@@ -45,14 +48,16 @@ func run() (err error) {
 		return fmt.Errorf("open database: %w", err)
 	}
 
+	// Nil values let cleanup handle failures before the server or scheduler
+	// have been started.
+	var apiServer *http.Server
 	var schedulerFinished <-chan struct{}
 	var cancelScheduler context.CancelFunc
 
-	// Register cleanup before migrations and service construction so startup
-	// failures also close the database. These variables are read on exit.
 	defer func() {
 		shutdownError := shutdownMonitor(
 			databasePool,
+			apiServer,
 			cancelScheduler,
 			schedulerFinished,
 		)
@@ -67,7 +72,7 @@ func run() (err error) {
 	statusRepository := devicestatus.NewDeviceStatusRepository(databasePool)
 	historyRepository := devicestatus.NewDeviceStatusHistoryRepository(databasePool)
 
-	// Setup REST client for probes, no redirects
+	// Do not follow redirects to a different device.
 	restClient := probe.NewRESTClient(&http.Client{
 		CheckRedirect: func(
 			request *http.Request,
@@ -76,6 +81,11 @@ func run() (err error) {
 			return http.ErrUseLastResponse
 		},
 	})
+
+	grpcClient := probe.NewGRPCClient()
+	deviceClient := probe.NewDeviceClient(restClient, grpcClient)
+
+	slog.Info("initialized clients")
 
 	deviceService := service.NewDeviceService(
 		databasePool,
@@ -88,7 +98,7 @@ func run() (err error) {
 		deviceRepository,
 		statusRepository,
 		historyRepository,
-		restClient,
+		deviceClient,
 	)
 
 	monitoringScheduler := service.NewMonitoringScheduler(
@@ -123,8 +133,6 @@ func run() (err error) {
 	)
 	defer stopSignalHandling()
 
-	// Keep scheduler cancellation separate from signal detection.
-	// Deferred cleanup owns cancellation and the subsequent timed wait.
 	schedulerContext, stopScheduler := context.WithCancel(context.Background())
 	cancelScheduler = stopScheduler
 
@@ -134,17 +142,18 @@ func run() (err error) {
 	var schedulerError error
 
 	go func() {
-		// Closing this channel signals that Run and its workers have finished.
-		// Read schedulerError only after receiving from this channel.
+		// Closing the channel signals that Run and its workers have finished.
 		defer close(schedulerDone)
 		schedulerError = monitoringScheduler.Run(schedulerContext)
 	}()
+
+	slog.Info("monitor started")
 
 	select {
 	case <-signalContext.Done():
 		slog.Info("monitor shutdown requested")
 
-		// A second Ctrl+C or SIGTERM can force termination during cleanup.
+		// A second signal can force termination during cleanup.
 		stopSignalHandling()
 		return nil
 
@@ -158,20 +167,21 @@ func run() (err error) {
 
 func shutdownMonitor(
 	databasePool *sql.DB,
+	apiServer *http.Server,
 	cancelScheduler context.CancelFunc,
 	schedulerFinished <-chan struct{},
 ) error {
 	applicationConfig := config.Get()
 
-	// Shutdown needs its own deadline because the running context will
-	// be canceled. This budget covers both workers and database cleanup.
+	// HTTP shutdown, scheduler completion, and database cleanup share
+	// one time budget.
 	shutdownContext, cancelShutdown := context.WithTimeout(
 		context.Background(),
 		applicationConfig.ShutdownTimeout,
 	)
 	defer cancelShutdown()
 
-	// cancel the scheduler if nil means it wasn't started
+	// Ask scheduler workers to stop while HTTP requests are draining.
 	if cancelScheduler != nil {
 		cancelScheduler()
 	}
@@ -194,12 +204,36 @@ func shutdownMonitor(
 			return shutdownError
 		}
 	}
+
+	if schedulerFinished != nil {
+		select {
+		case <-schedulerFinished:
+			// Run and its workers have finished.
+
+		case <-shutdownContext.Done():
+			// Workers may still use the pool, so do not close it here.
+			return fmt.Errorf(
+				"wait for scheduler shutdown: %w",
+				shutdownContext.Err(),
+			)
+		}
+	}
+
+	if err := shutdownContext.Err(); err != nil {
+		return fmt.Errorf("monitor shutdown deadline: %w", err)
+	}
+
+	// DB.Close has no context parameter and can wait for ongoing queries.
+	// At this point the HTTP handlers and scheduler have finished.
+	databaseClosed := make(chan error, 1)
+	go func() {
+		databaseClosed <- databasePool.Close()
 	}()
 
 	select {
-	case cleanupError := <-cleanupFinished:
-		if cleanupError != nil {
-			return cleanupError
+	case err := <-databaseClosed:
+		if err != nil {
+			return fmt.Errorf("close database connection pool: %w", err)
 		}
 
 		slog.Info("monitor cleanup completed")
@@ -207,8 +241,7 @@ func shutdownMonitor(
 
 	case <-shutdownContext.Done():
 		return fmt.Errorf(
-			"monitor cleanup exceeded %s: %w",
-			applicationConfig.ShutdownTimeout,
+			"close database connection pool exceeded shutdown timeout: %w",
 			shutdownContext.Err(),
 		)
 	}

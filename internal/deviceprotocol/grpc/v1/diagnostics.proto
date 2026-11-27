@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package device.v1;
+
+option go_package = "github.com/SavaArsikin/ubiquiti-device-monitoring-service/internal/deviceprotocol/grpc/v1;devicev1";
+
+// DeviceDiagnostics describes the diagnostics operation offered by a device.
+service DeviceDiagnostics {
+  rpc GetDiagnostics(GetDiagnosticsRequest) returns (GetDiagnosticsResponse);
+}
+
+// The device already knows its own identity, so no request fields are needed.
+message GetDiagnosticsRequest {}
+
+// These fields correspond to the existing deviceprotocol.Diagnostics model.
+message GetDiagnosticsResponse {
+  string hardware_version = 1;
+  string software_version = 2;
+  string firmware_version = 3;
+  string status = 4;
+
+  // Presence matters: the checksum may be unavailable.
+  optional string checksum = 5;
+
+  // Explains an incomplete result, such as checksum_unavailable.
+  string failure_category = 6;
+}

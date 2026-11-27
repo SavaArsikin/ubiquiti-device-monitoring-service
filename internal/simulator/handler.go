@@ -79,9 +79,12 @@ func NewHandler(cfg Config, generator checksumGenerator) http.Handler {
 			return
 		}
 
-		writeJSON(w, deviceprotocol.Capabilities{
+		capabilities := deviceprotocol.Capabilities{
 			RESTDiagnosticsPath: "/diagnostics",
-		})
+			GRPCTarget:          cfg.GRPCTarget,
+		}
+
+		writeJSON(w, capabilities)
 	})
 
 	mux.HandleFunc("GET /diagnostics", func(w http.ResponseWriter, r *http.Request) {

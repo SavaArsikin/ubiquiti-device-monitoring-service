@@ -16,6 +16,9 @@ type Config struct {
 	ReadHeaderTimeout time.Duration `env:"READ_HEADER_TIMEOUT,required,notEmpty"`
 	ShutdownTimeout   time.Duration `env:"SHUTDOWN_TIMEOUT,required,notEmpty"`
 
+	GRPCListenAddr string `env:"GRPC_LISTEN_ADDR"`
+	GRPCTarget     string `env:"GRPC_TARGET"`
+
 	HardwareVersion string `env:"HARDWARE_VERSION,required,notEmpty"`
 	SoftwareVersion string `env:"SOFTWARE_VERSION,required,notEmpty"`
 	FirmwareVersion string `env:"FIRMWARE_VERSION,required,notEmpty"`
@@ -65,6 +68,27 @@ func (cfg Config) Validate() error {
 		}
 	}
 
+	// Both values must be supplied together. Leaving both empty keeps
+	// the simulator in its existing REST-only mode.
+	if (cfg.GRPCListenAddr == "") != (cfg.GRPCTarget == "") {
+		problems = append(
+			problems,
+			errors.New("GRPC_LISTEN_ADDR and GRPC_TARGET must be provided together"),
+		)
+	}
+
+	if cfg.GRPCListenAddr != "" {
+		if err := validateGRPCAddress("GRPC_LISTEN_ADDR", cfg.GRPCListenAddr, false); err != nil {
+			problems = append(problems, err)
+		}
+	}
+
+	if cfg.GRPCTarget != "" {
+		if err := validateGRPCAddress("GRPC_TARGET", cfg.GRPCTarget, true); err != nil {
+			problems = append(problems, err)
+		}
+	}
+
 	for name, duration := range map[string]time.Duration{
 		"READ_HEADER_TIMEOUT": cfg.ReadHeaderTimeout,
 		"SHUTDOWN_TIMEOUT":    cfg.ShutdownTimeout,
@@ -101,4 +125,27 @@ func validBehavior(value string, diagnostics bool) bool {
 	default:
 		return false
 	}
+}
+
+func validateGRPCAddress(name, address string, advertised bool) error {
+	host, portText, err := net.SplitHostPort(address)
+	if err != nil || host == "" {
+		return fmt.Errorf("%s must be a host:port address", name)
+	}
+
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		return fmt.Errorf("%s must have a port between 1 and 65535", name)
+	}
+
+	// An unspecified address is useful for listening, but it is not
+	// an address the monitor can use to contact the simulator.
+	if advertised {
+		parsedIP := net.ParseIP(host)
+		if parsedIP != nil && parsedIP.IsUnspecified() {
+			return fmt.Errorf("%s must identify a reachable host", name)
+		}
+	}
+
+	return nil
 }
