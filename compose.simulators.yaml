@@ -1,0 +1,30 @@
+x-simulator: &simulator
+  image: device-simulator:local
+  build:
+    context: .
+    dockerfile: Dockerfile.simulator
+  command: ['-config', '/app/simulator.env']
+  stop_grace_period: 15s
+
+services:
+  simulator-healthy:
+    <<: *simulator
+    ports:
+      - '127.0.0.1:8081:8081'
+    volumes:
+      - ./demo/simulator-healthy.env:/app/simulator.env:ro
+
+  simulator-flaky:
+    <<: *simulator
+    ports:
+      - '127.0.0.1:8082:8081'
+    volumes:
+      - ./demo/simulator-flaky.env:/app/simulator.env:ro
+
+  simulator-grpc:
+    <<: *simulator
+    ports:
+      - '127.0.0.1:8083:8081'
+      - '127.0.0.1:9091:9091'
+    volumes:
+      - ./demo/simulator-grpc.env:/app/simulator.env:ro

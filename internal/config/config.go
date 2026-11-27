@@ -22,7 +22,6 @@ type Config struct {
 	DBConnectTimeout    time.Duration `env:"DB_CONNECT_TIMEOUT,required,notEmpty"`
 	DBMigrationTimeout  time.Duration `env:"DB_MIGRATION_TIMEOUT,required,notEmpty"`
 	HTTPAddr            string        `env:"HTTP_ADDR,required,notEmpty"`
-	GRPCAddr            string        `env:"GRPC_ADDR,required,notEmpty"`
 	APIUsername         string        `env:"API_USERNAME,required,notEmpty"`
 	APIPassword         string        `env:"API_PASSWORD,required,notEmpty"`
 	PollInterval        time.Duration `env:"POLL_INTERVAL,required,notEmpty"`
@@ -30,8 +29,8 @@ type Config struct {
 	RetryDelay          time.Duration `env:"RETRY_DELAY,required,notEmpty"`
 	MaxRetries          int           `env:"MAX_RETRIES,required"`
 	FailureThreshold    int           `env:"FAILURE_THRESHOLD,required"`
-	HistoryRetention    time.Duration `env:"HISTORY_RETENTION,required,notEmpty"`
 	MaxConcurrentProbes int           `env:"MAX_CONCURRENT_PROBES,required"`
+	ShutdownTimeout     time.Duration `env:"SHUTDOWN_TIMEOUT,required,notEmpty"`
 }
 
 // global config should be immutable after init
@@ -132,18 +131,12 @@ func (cfg Config) Validate() error {
 	if cfg.DBConnectTimeout <= 0 {
 		problems = append(problems, errors.New("DB_CONNECT_TIMEOUT must be positive"))
 	}
-
 	if cfg.DBMigrationTimeout <= 0 {
 		problems = append(problems, errors.New("DB_MIGRATION_TIMEOUT must be positive"))
 	}
-
 	if err := validateListenAddr("HTTP_ADDR", cfg.HTTPAddr); err != nil {
 		problems = append(problems, err)
 	}
-	if err := validateListenAddr("GRPC_ADDR", cfg.GRPCAddr); err != nil {
-		problems = append(problems, err)
-	}
-
 	if cfg.PollInterval <= 0 {
 		problems = append(problems, errors.New("POLL_INTERVAL must be positive"))
 	}
@@ -159,11 +152,11 @@ func (cfg Config) Validate() error {
 	if cfg.FailureThreshold < 1 {
 		problems = append(problems, errors.New("FAILURE_THRESHOLD must be at least 1"))
 	}
-	if cfg.HistoryRetention <= 0 {
-		problems = append(problems, errors.New("HISTORY_RETENTION must be positive"))
-	}
 	if cfg.MaxConcurrentProbes < 1 {
 		problems = append(problems, errors.New("MAX_CONCURRENT_PROBES must be at least 1"))
+	}
+	if cfg.ShutdownTimeout <= 0 {
+		problems = append(problems, errors.New("SHUTDOWN_TIMEOUT must be positive"))
 	}
 
 	return errors.Join(problems...)

@@ -368,6 +368,125 @@ func TestListActiveDevices(t *testing.T) {
 	})
 }
 
+func TestListArchivedDevices(t *testing.T) {
+	db := testutils.OpenDatabase(t)
+	repository := device.NewDeviceRepository(db)
+
+	t.Run("return an empty list", func(t *testing.T) {
+		testutils.TruncateTables(t, db)
+		testutils.InsertNewDeviceIntoDb(t, db, nil)
+
+		got, err := repository.ListArchived(t.Context(), nil)
+		if err != nil {
+			t.Fatalf("list archived devices: %v", err)
+		}
+		if len(got) != 0 {
+			t.Errorf("expected no archived devices, got %d", len(got))
+		}
+	})
+
+	t.Run("return archived devices in order", func(t *testing.T) {
+		testutils.TruncateTables(t, db)
+
+		later := testutils.InsertNewDeviceIntoDb(t, db, nil)
+		earlier := testutils.InsertNewDeviceIntoDb(t, db, nil)
+		testutils.InsertNewDeviceIntoDb(t, db, nil)
+
+		baseTime := time.Now().UTC().Truncate(time.Microsecond).Add(-2 * time.Hour)
+		for _, entry := range []struct {
+			device    *device.Device
+			updatedAt time.Time
+		}{
+			{earlier, baseTime},
+			{later, baseTime.Add(time.Hour)},
+		} {
+			err := db.QueryRowContext(t.Context(), `
+				UPDATE devices
+				SET archived_at = $2, updated_at = $2
+				WHERE id = $1
+				RETURNING archived_at, updated_at
+			`, entry.device.ID, entry.updatedAt).Scan(
+				&entry.device.ArchivedAt,
+				&entry.device.UpdatedAt,
+			)
+			if err != nil {
+				t.Fatalf("archive test device: %v", err)
+			}
+		}
+
+		got, err := repository.ListArchived(t.Context(), nil)
+		if err != nil {
+			t.Fatalf("list archived devices: %v", err)
+		}
+
+		want := []*device.Device{earlier, later}
+		if diff := cmp.Diff(want, got); diff != "" {
+			t.Errorf("device list mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("include uncommitted archive in its transaction", func(t *testing.T) {
+		testutils.TruncateTables(t, db)
+		existing := testutils.InsertNewDeviceIntoDb(t, db, nil)
+		tx := testutils.BeginTransaction(t, db)
+
+		err := tx.QueryRowContext(t.Context(), `
+			UPDATE devices
+			SET archived_at = CURRENT_TIMESTAMP,
+			    updated_at = CURRENT_TIMESTAMP
+			WHERE id = $1
+			RETURNING archived_at, updated_at
+		`, existing.ID).Scan(&existing.ArchivedAt, &existing.UpdatedAt)
+		if err != nil {
+			t.Fatalf("archive device in transaction: %v", err)
+		}
+
+		got, err := repository.ListArchived(t.Context(), tx)
+		if err != nil {
+			t.Fatalf("list archived devices in transaction: %v", err)
+		}
+		if diff := cmp.Diff([]*device.Device{existing}, got); diff != "" {
+			t.Errorf("device list mismatch (-want +got):\n%s", diff)
+		}
+
+		outsideTx, err := repository.ListArchived(t.Context(), nil)
+		if err != nil {
+			t.Fatalf("list archived devices outside transaction: %v", err)
+		}
+		if len(outsideTx) != 0 {
+			t.Errorf("uncommitted archive was visible, got %d devices", len(outsideTx))
+		}
+	})
+
+	t.Run("canceled context", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		got, err := repository.ListArchived(ctx, nil)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context cancellation, got: %v", err)
+		}
+		if got != nil {
+			t.Errorf("expected nil list, got %+v", got)
+		}
+	})
+
+	t.Run("closed transaction", func(t *testing.T) {
+		tx := testutils.BeginTransaction(t, db)
+		if err := tx.Rollback(); err != nil {
+			t.Fatalf("rollback transaction: %v", err)
+		}
+
+		got, err := repository.ListArchived(t.Context(), tx)
+		if !errors.Is(err, sql.ErrTxDone) {
+			t.Fatalf("expected closed transaction error, got: %v", err)
+		}
+		if got != nil {
+			t.Errorf("expected nil list, got %+v", got)
+		}
+	})
+}
+
 func TestUpdateDevice(t *testing.T) {
 	db := testutils.OpenDatabase(t)
 	repository := device.NewDeviceRepository(db)
@@ -807,14 +926,19 @@ func TestRestoreDevice(t *testing.T) {
 		testutils.TruncateTables(t, db)
 		existing := testutils.InsertNewDeviceIntoDb(t, db, nil)
 
-		archivedAt := time.Now().UTC()
+		archivedAt := time.Date(2020, time.January, 2, 0, 0, 0, 0, time.UTC)
+		createdAt := archivedAt.Add(-time.Hour)
+
 		_, err := db.ExecContext(t.Context(), `
-			UPDATE devices SET archived_at = $2, updated_at = $2
+			UPDATE devices
+			SET created_at = $3, archived_at = $2, updated_at = $2
 			WHERE id = $1
-		`, existing.ID, archivedAt)
+		`, existing.ID, archivedAt, createdAt)
 		if err != nil {
 			t.Fatalf("archive test device: %v", err)
 		}
+
+		existing.CreatedAt = createdAt
 		existing.ArchivedAt = &archivedAt
 		existing.UpdatedAt = archivedAt
 
@@ -870,14 +994,19 @@ func TestRestoreDevice(t *testing.T) {
 			testutils.TruncateTables(t, db)
 			existing := testutils.InsertNewDeviceIntoDb(t, db, nil)
 
-			archivedAt := time.Now().UTC()
+			archivedAt := time.Date(2020, time.January, 2, 0, 0, 0, 0, time.UTC)
+			createdAt := archivedAt.Add(-time.Hour)
+
 			_, err := db.ExecContext(t.Context(), `
-				UPDATE devices SET archived_at = $2, updated_at = $2
+				UPDATE devices
+				SET created_at = $3, archived_at = $2, updated_at = $2
 				WHERE id = $1
-			`, existing.ID, archivedAt)
+			`, existing.ID, archivedAt, createdAt)
 			if err != nil {
 				t.Fatalf("archive test device: %v", err)
 			}
+
+			existing.CreatedAt = createdAt
 			existing.ArchivedAt = &archivedAt
 			existing.UpdatedAt = archivedAt
 

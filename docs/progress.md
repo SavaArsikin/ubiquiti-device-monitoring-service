@@ -2,48 +2,43 @@
 
 Plan: [implementation-plan.md](implementation-plan.md)
 
-- [x] Agree on the simulator-only implementation plan.
-- [ ] Day 1: Scaffold, configuration, and logging (monitor bootstrap done;
-  other component env files and ignore rules remain).
-- [ ] Day 1: Persistence and shared service.
-- [ ] Day 1: Simulator and first probe.
-- [ ] Day 2: APIs and diagnostic protocols.
-- [ ] Day 2: Polling, recovery, history, and retention.
-- [ ] Day 2: Compose, tests, and README handoff.
+- [x] Agree on the two-day, simulator-only Go PoC scope.
+- [x] Bootstrap, logging and monitor/simulator configuration.
+- [x] PostgreSQL migrations, inventory/current-status/history repositories, and
+  shared inventory/monitoring services.
+- [x] REST and gRPC device diagnostics, checksum stub, and bounded scheduler.
+- [x] Basic-authenticated REST API for inventory and current status.
+- [ ] Add monitor to Compose; automated simulator and full live end-to-end tests.
 
-**Current state:** Monitor bootstrap, file-only configuration and logging are
-implemented. Database setup and device inventory persistence are underway;
-snapshots, history, and the shared service layer remain.
+**Current state:** The monitor serves REST and polls devices. Device discovery
+uses HTTP; diagnostics use REST or gRPC, preferring gRPC when advertised. The
+Compose setup includes PostgreSQL and healthy, flaky, and gRPC simulator
+instances. The monitor exposes REST only; gRPC is used for device diagnostics.
+History accumulates without automatic pruning. The repository's delete-before
+operation exists but is currently unused; no retention setting or pruning task
+is planned.
 
-## Update notes
+## Decisions and handoff
 
-- Configuration decision: use `github.com/caarlos0/env/v11` with struct `env`
-  tags and parse only the map read by `godotenv.Read`. Required values have no
-  code defaults or ambient fallback; unknown keys are ignored and semantic
-  validation is explicit. `Init` and `Get` return configuration copies.
-- The monitor example covers its required keys; `.env.monitor` is ignored.
-  Logger configuration uses `LOG_FORMAT=local|json` and
-  `LOG_LEVEL=debug|info|warn|error`; tint's default color behavior is not
-  configurable.
-- Shared test helpers initialize config. Config tests cover validation,
-  missing file/key, no ambient fallback and value copies. Logger tests cover
-  local and JSON output, level filtering and nested attributes, stripping ANSI
-  codes before checking local output.
-- PostgreSQL connection, embedded Goose devices migration, local setup, and a
-  device repository are implemented. The monitor opens the database and applies
-  migrations at startup. The repository supports create, get, list active,
-  update, soft archive, and explicit restore by ID, with optional transactions.
-  A health URL is editable and is not the device identity; restore retains the
-  ID needed to associate future history. Listing archived devices and a restore
-  API remain future work.
-- The user reports that the restore tests pass. Database/repository tests
-  require the prepared local test database; no full-suite result is claimed
-  for the current changes. The earlier config/logger tests, full suite, vet,
-  and bootstrap startup passed before the database work.
-- **Next:** implement snapshot/history persistence and the shared service layer.
-  Add Postgres and simulator env examples and secret ignore rules as those
-  components are completed, and separate database-dependent tests from the
-  hardware-free suite.
+- REST contract: Basic Auth; active inventory at `GET /api/v1/devices`,
+  archived inventory at `GET /api/v1/devices?state=archived`, create with
+  `POST`, full replacement with `PUT /api/v1/devices/{deviceID}`, soft archive
+  with `DELETE`, and restore with `POST .../{deviceID}/restore`. Status reads
+  are `GET /api/v1/status` and `GET /api/v1/devices/{deviceID}/status`.
+- Inventory changes take effect on the next scheduler sweep, not via immediate
+  probes. The scheduler starts a sweep on startup and delays the next sweep
+  until the configured interval after completion.
+- History rows are persisted indefinitely. The delete-before repository
+  operation is unused; automatic pruning is not part of the plan.
+- User-reported verification: service/repository tests pass, REST route tests
+  pass, and REST plus gRPC simulator smoke checks succeed. These were not
+  independently rerun for this tracker update; do not treat them as a full
+  monitor-to-device end-to-end test.
+- Database/repository tests require the prepared test database and share tables;
+  run the full suite serially with `make test`. Service tests use stubs and
+  sqlmock.
+- **Next:** wire the monitor into Compose and add automated simulator and full
+  end-to-end coverage.
 
-When resuming, record the completed stage, decisions and unresolved questions,
-verification performed, and the next concrete step here. Do not record secrets.
+When resuming, update the checkboxes and record the exact verification run.
+Never put real credentials in this document.
