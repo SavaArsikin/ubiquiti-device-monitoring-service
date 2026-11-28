@@ -150,6 +150,7 @@ func (monitoringService *MonitoringService) PollDevice(
 	if deviceAfterPolling.ArchivedAt != nil {
 		return nil, ErrDeviceArchived
 	}
+	// Check if device changed during poll or health URL updated. We are discarding this result if so.
 	if deviceAfterPolling.HealthURL != deviceBeforePolling.HealthURL ||
 		!deviceAfterPolling.UpdatedAt.Equal(deviceBeforePolling.UpdatedAt) {
 		return nil, ErrDeviceChanged
@@ -279,8 +280,7 @@ func (monitoringService *MonitoringService) probeDeviceOnce(
 		reachableAt: time.Now().UTC().Truncate(time.Microsecond),
 	}
 
-	// Do not silently use REST when the device advertises gRPC; that would
-	// hide the fact that the advertised protocol is not implemented yet.
+	// We do not want to silently use REST if gRPC is available.
 	var diagnostics *deviceprotocol.Diagnostics
 
 	switch {
@@ -335,6 +335,7 @@ func buildStatusSnapshotAndHistory(
 	pollCompletedAt time.Time,
 ) (devicestatus.DeviceStatus, devicestatus.DeviceStatusHistory) {
 	applicationConfig := config.Get()
+
 	nextStatus := *currentStatus
 	nextStatus.LastCheckedAt = &pollCompletedAt
 	nextStatus.DiagnosticsComplete = result.complete
@@ -346,9 +347,9 @@ func buildStatusSnapshotAndHistory(
 		nextStatus.LastReachableAt = &result.reachableAt
 	} else {
 		nextStatus.ConsecutiveFailures++
-		nextStatus.ReachabilityStatus = devicestatus.ReachabilityDegraded
-
-		if nextStatus.ConsecutiveFailures >= applicationConfig.FailureThreshold {
+		if nextStatus.ConsecutiveFailures < applicationConfig.FailureThreshold {
+			nextStatus.ReachabilityStatus = devicestatus.ReachabilityDegraded
+		} else {
 			nextStatus.ReachabilityStatus = devicestatus.ReachabilityUnreachable
 		}
 	}
@@ -363,13 +364,11 @@ func buildStatusSnapshotAndHistory(
 	}
 
 	if result.diagnostics != nil {
-		diagnostics := result.diagnostics
-
-		historyEntry.DeviceReportedStatus = stringPointerIfNotEmpty(diagnostics.Status)
-		historyEntry.HardwareVersion = stringPointerIfNotEmpty(diagnostics.HardwareVersion)
-		historyEntry.SoftwareVersion = stringPointerIfNotEmpty(diagnostics.SoftwareVersion)
-		historyEntry.FirmwareVersion = stringPointerIfNotEmpty(diagnostics.FirmwareVersion)
-		historyEntry.Checksum = diagnostics.Checksum
+		historyEntry.DeviceReportedStatus = stringPointerIfNotEmpty(result.diagnostics.Status)
+		historyEntry.HardwareVersion = stringPointerIfNotEmpty(result.diagnostics.HardwareVersion)
+		historyEntry.SoftwareVersion = stringPointerIfNotEmpty(result.diagnostics.SoftwareVersion)
+		historyEntry.FirmwareVersion = stringPointerIfNotEmpty(result.diagnostics.FirmwareVersion)
+		historyEntry.Checksum = result.diagnostics.Checksum
 
 		// Incomplete results belong in history, but must not replace the
 		// snapshot's last fully validated diagnostics.

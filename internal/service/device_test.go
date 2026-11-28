@@ -326,170 +326,309 @@ func TestCreateDevice(t *testing.T) {
 
 const testDeviceID = "11111111-1111-4111-8111-111111111111"
 
-func TestGetAndRestoreDevice(t *testing.T) {
-	for _, method := range []string{"Get", "Restore"} {
-		t.Run(method, func(t *testing.T) {
-			for _, tc := range []struct {
-				name          string
-				id            string
-				repositoryErr error
-				validationErr string
-			}{
-				{
-					name: "success",
-					id:   testDeviceID,
-				},
-				{
-					name:          "repository error",
-					id:            testDeviceID,
-					repositoryErr: device.ErrDeviceNotFound,
-				},
-				{
-					name:          "invalid ID",
-					id:            "not-a-uuid",
-					validationErr: "device ID must be a valid UUID",
-				},
-			} {
-				t.Run(tc.name, func(t *testing.T) {
-					db, _ := openMockDatabase(t)
-					expected := &device.Device{
-						ID:        testDeviceID,
-						Name:      "Router",
-						HealthURL: "http://localhost:8081/health",
-					}
+func TestGetDevice(t *testing.T) {
+	testCases := []struct {
+		name          string
+		id            string
+		repositoryErr error
+		validationErr string
+	}{
+		{
+			name: "success",
+			id:   testDeviceID,
+		},
+		{
+			name:          "repository error",
+			id:            testDeviceID,
+			repositoryErr: device.ErrDeviceNotFound,
+		},
+		{
+			name:          "invalid ID",
+			id:            "not-a-uuid",
+			validationErr: "device ID must be a valid UUID",
+		},
+	}
 
-					devices := &deviceRepositoryStub{
-						result: expected,
-						err:    tc.repositoryErr,
-					}
-					statuses := &statusRepositoryStub{}
-					deviceService := service.NewDeviceService(db, devices, statuses)
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			db, _ := openMockDatabase(t)
 
-					ctx := t.Context()
-					var got *device.Device
-					var err error
-					if method == "Get" {
-						got, err = deviceService.Get(ctx, tc.id)
-					} else {
-						got, err = deviceService.Restore(ctx, tc.id)
-					}
+			expected := &device.Device{
+				ID:        testDeviceID,
+				Name:      "Router",
+				HealthURL: "http://localhost:8081/health",
+			}
 
-					if tc.validationErr != "" {
-						if err == nil || err.Error() != tc.validationErr {
-							t.Fatalf("expected error %q, got: %v", tc.validationErr, err)
-						}
-						if got != nil || devices.calls != 0 {
-							t.Fatal("expected nil result and no repository calls")
-						}
-					} else {
-						if devices.calls != 1 || devices.method != method {
-							t.Fatalf("expected one %s call, got %d %s calls",
-								method, devices.calls, devices.method)
-						}
-						if devices.id != tc.id || devices.tx != nil || devices.ctx != ctx {
-							t.Error("unexpected repository arguments")
-						}
+			devices := &deviceRepositoryStub{
+				result: expected,
+				err:    testCase.repositoryErr,
+			}
+			statuses := &statusRepositoryStub{}
+			deviceService := service.NewDeviceService(db, devices, statuses)
 
-						if tc.repositoryErr != nil {
-							if !errors.Is(err, tc.repositoryErr) {
-								t.Fatalf("expected repository error, got: %v", err)
-							}
-							if got != nil {
-								t.Errorf("expected nil device, got %+v", got)
-							}
-						} else {
-							if err != nil {
-								t.Fatalf("%s device: %v", method, err)
-							}
-							if diff := cmp.Diff(expected, got); diff != "" {
-								t.Errorf("device mismatch (-want +got):\n%s", diff)
-							}
-						}
-					}
+			ctx := t.Context()
+			got, err := deviceService.Get(ctx, testCase.id)
 
-					if statuses.calls != 0 {
-						t.Error("status repository should not be called")
+			if testCase.validationErr != "" {
+				if err == nil || err.Error() != testCase.validationErr {
+					t.Fatalf("expected error %q, got: %v", testCase.validationErr, err)
+				}
+				if got != nil || devices.calls != 0 {
+					t.Fatal("expected nil result and no repository calls")
+				}
+			} else {
+				if devices.calls != 1 || devices.method != "Get" {
+					t.Fatalf("expected one Get call, got %d %s calls",
+						devices.calls, devices.method)
+				}
+				if devices.id != testCase.id || devices.tx != nil || devices.ctx != ctx {
+					t.Error("unexpected repository arguments")
+				}
+
+				if testCase.repositoryErr != nil {
+					if !errors.Is(err, testCase.repositoryErr) {
+						t.Fatalf("expected repository error, got: %v", err)
 					}
-				})
+					if got != nil {
+						t.Errorf("expected nil device, got %+v", got)
+					}
+				} else {
+					if err != nil {
+						t.Fatalf("get device: %v", err)
+					}
+					if diff := cmp.Diff(expected, got); diff != "" {
+						t.Errorf("device mismatch (-want +got):\n%s", diff)
+					}
+				}
+			}
+
+			if statuses.calls != 0 {
+				t.Error("status repository should not be called")
 			}
 		})
 	}
 }
 
-func TestListDevices(t *testing.T) {
-	for _, method := range []string{"ListActive", "ListArchived"} {
-		t.Run(method, func(t *testing.T) {
-			repositoryErr := errors.New("list failed")
+func TestRestoreDevice(t *testing.T) {
+	testCases := []struct {
+		name          string
+		id            string
+		repositoryErr error
+		validationErr string
+	}{
+		{
+			name: "success",
+			id:   testDeviceID,
+		},
+		{
+			name:          "repository error",
+			id:            testDeviceID,
+			repositoryErr: device.ErrDeviceNotFound,
+		},
+		{
+			name:          "invalid ID",
+			id:            "not-a-uuid",
+			validationErr: "device ID must be a valid UUID",
+		},
+	}
 
-			for _, tc := range []struct {
-				name    string
-				result  []*device.Device
-				wantErr error
-			}{
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			db, _ := openMockDatabase(t)
+
+			expected := &device.Device{
+				ID:        testDeviceID,
+				Name:      "Router",
+				HealthURL: "http://localhost:8081/health",
+			}
+
+			devices := &deviceRepositoryStub{
+				result: expected,
+				err:    testCase.repositoryErr,
+			}
+			statuses := &statusRepositoryStub{}
+			deviceService := service.NewDeviceService(db, devices, statuses)
+
+			ctx := t.Context()
+			got, err := deviceService.Restore(ctx, testCase.id)
+
+			if testCase.validationErr != "" {
+				if err == nil || err.Error() != testCase.validationErr {
+					t.Fatalf("expected error %q, got: %v", testCase.validationErr, err)
+				}
+				if got != nil || devices.calls != 0 {
+					t.Fatal("expected nil result and no repository calls")
+				}
+			} else {
+				if devices.calls != 1 || devices.method != "Restore" {
+					t.Fatalf("expected one Restore call, got %d %s calls",
+						devices.calls, devices.method)
+				}
+				if devices.id != testCase.id || devices.tx != nil || devices.ctx != ctx {
+					t.Error("unexpected repository arguments")
+				}
+
+				if testCase.repositoryErr != nil {
+					if !errors.Is(err, testCase.repositoryErr) {
+						t.Fatalf("expected repository error, got: %v", err)
+					}
+					if got != nil {
+						t.Errorf("expected nil device, got %+v", got)
+					}
+				} else {
+					if err != nil {
+						t.Fatalf("restore device: %v", err)
+					}
+					if diff := cmp.Diff(expected, got); diff != "" {
+						t.Errorf("device mismatch (-want +got):\n%s", diff)
+					}
+				}
+			}
+
+			if statuses.calls != 0 {
+				t.Error("status repository should not be called")
+			}
+		})
+	}
+}
+
+func TestListActiveDevices(t *testing.T) {
+	repositoryErr := errors.New("list failed")
+
+	testCases := []struct {
+		name    string
+		result  []*device.Device
+		wantErr error
+	}{
+		{
+			name: "success",
+			result: []*device.Device{
 				{
-					name: "success",
-					result: []*device.Device{
-						{
-							ID:        testDeviceID,
-							Name:      "Router",
-							HealthURL: "http://localhost:8081/health",
-						},
-					},
+					ID:        testDeviceID,
+					Name:      "Router",
+					HealthURL: "http://localhost:8081/health",
 				},
+			},
+		},
+		{
+			name:   "empty list",
+			result: []*device.Device{},
+		},
+		{
+			name:    "repository error",
+			wantErr: repositoryErr,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			db, _ := openMockDatabase(t)
+			devices := &deviceRepositoryStub{
+				listResult: testCase.result,
+				err:        testCase.wantErr,
+			}
+			statuses := &statusRepositoryStub{}
+			deviceService := service.NewDeviceService(db, devices, statuses)
+
+			ctx := t.Context()
+			got, err := deviceService.ListActive(ctx)
+
+			if devices.calls != 1 || devices.method != "ListActive" {
+				t.Fatalf("expected one ListActive call, got %d %s calls",
+					devices.calls, devices.method)
+			}
+			if devices.tx != nil || devices.ctx != ctx {
+				t.Error("unexpected repository arguments")
+			}
+			if statuses.calls != 0 {
+				t.Error("status repository should not be called")
+			}
+
+			if testCase.wantErr != nil {
+				if !errors.Is(err, testCase.wantErr) {
+					t.Fatalf("expected repository error, got: %v", err)
+				}
+				if got != nil {
+					t.Errorf("expected nil list, got %+v", got)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("list active devices: %v", err)
+				}
+				if diff := cmp.Diff(testCase.result, got); diff != "" {
+					t.Errorf("device list mismatch (-want +got):\n%s", diff)
+				}
+			}
+		})
+	}
+}
+
+func TestListArchivedDevices(t *testing.T) {
+	repositoryErr := errors.New("list failed")
+
+	testCases := []struct {
+		name    string
+		result  []*device.Device
+		wantErr error
+	}{
+		{
+			name: "success",
+			result: []*device.Device{
 				{
-					name:   "empty list",
-					result: []*device.Device{},
+					ID:        testDeviceID,
+					Name:      "Router",
+					HealthURL: "http://localhost:8081/health",
 				},
-				{
-					name:    "repository error",
-					wantErr: repositoryErr,
-				},
-			} {
-				t.Run(tc.name, func(t *testing.T) {
-					db, _ := openMockDatabase(t)
-					devices := &deviceRepositoryStub{
-						listResult: tc.result,
-						err:        tc.wantErr,
-					}
-					statuses := &statusRepositoryStub{}
-					deviceService := service.NewDeviceService(db, devices, statuses)
+			},
+		},
+		{
+			name:   "empty list",
+			result: []*device.Device{},
+		},
+		{
+			name:    "repository error",
+			wantErr: repositoryErr,
+		},
+	}
 
-					ctx := t.Context()
-					var got []*device.Device
-					var err error
-					if method == "ListActive" {
-						got, err = deviceService.ListActive(ctx)
-					} else {
-						got, err = deviceService.ListArchived(ctx)
-					}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			db, _ := openMockDatabase(t)
+			devices := &deviceRepositoryStub{
+				listResult: testCase.result,
+				err:        testCase.wantErr,
+			}
+			statuses := &statusRepositoryStub{}
+			deviceService := service.NewDeviceService(db, devices, statuses)
 
-					if devices.calls != 1 || devices.method != method {
-						t.Fatalf("expected one %s call, got %d %s calls",
-							method, devices.calls, devices.method)
-					}
-					if devices.tx != nil || devices.ctx != ctx {
-						t.Error("unexpected repository arguments")
-					}
-					if statuses.calls != 0 {
-						t.Error("status repository should not be called")
-					}
+			ctx := t.Context()
+			got, err := deviceService.ListArchived(ctx)
 
-					if tc.wantErr != nil {
-						if !errors.Is(err, tc.wantErr) {
-							t.Fatalf("expected repository error, got: %v", err)
-						}
-						if got != nil {
-							t.Errorf("expected nil list, got %+v", got)
-						}
-					} else {
-						if err != nil {
-							t.Fatalf("list devices: %v", err)
-						}
-						if diff := cmp.Diff(tc.result, got); diff != "" {
-							t.Errorf("device list mismatch (-want +got):\n%s", diff)
-						}
-					}
-				})
+			if devices.calls != 1 || devices.method != "ListArchived" {
+				t.Fatalf("expected one ListArchived call, got %d %s calls",
+					devices.calls, devices.method)
+			}
+			if devices.tx != nil || devices.ctx != ctx {
+				t.Error("unexpected repository arguments")
+			}
+			if statuses.calls != 0 {
+				t.Error("status repository should not be called")
+			}
+
+			if testCase.wantErr != nil {
+				if !errors.Is(err, testCase.wantErr) {
+					t.Fatalf("expected repository error, got: %v", err)
+				}
+				if got != nil {
+					t.Errorf("expected nil list, got %+v", got)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("list archived devices: %v", err)
+				}
+				if diff := cmp.Diff(testCase.result, got); diff != "" {
+					t.Errorf("device list mismatch (-want +got):\n%s", diff)
+				}
 			}
 		})
 	}
