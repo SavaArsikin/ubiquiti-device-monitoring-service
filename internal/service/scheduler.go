@@ -64,6 +64,7 @@ func (scheduler *MonitoringScheduler) Run(ctx context.Context) error {
 			return nil
 		}
 
+		// Wait for next poll interval or shutdown.
 		pollingTimer := time.NewTimer(applicationConfig.PollInterval)
 		select {
 		case <-pollingTimer.C:
@@ -96,7 +97,7 @@ func (scheduler *MonitoringScheduler) pollActiveDevices(
 		workerCount = len(activeDevices)
 	}
 
-	// Workers consume device IDs from this queue. Devices beyond the worker
+	// Workers consume devices from this queue. Devices beyond the worker
 	// limit wait here rather than being dropped or polled concurrently.
 	deviceQueue := make(chan *device.Device)
 	var workerGroup sync.WaitGroup
@@ -106,48 +107,7 @@ func (scheduler *MonitoringScheduler) pollActiveDevices(
 
 		go func() {
 			defer workerGroup.Done()
-
-			for {
-				select {
-				case <-ctx.Done():
-					return
-
-				// Get next device from queue as long as available
-				case monitoredDevice, queueOpen := <-deviceQueue:
-					if !queueOpen {
-						return
-					}
-					if ctx.Err() != nil {
-						return
-					}
-					if monitoredDevice == nil {
-						slog.Error("active device list contains a nil device")
-						continue
-					}
-
-					_, err := scheduler.monitoringService.PollDevice(
-						ctx,
-						monitoredDevice.ID,
-					)
-					if err != nil {
-						// Cancellation is expected during shutdown, not a
-						// device failure to report as an error.
-						if ctx.Err() != nil {
-							return
-						}
-
-						// One device's problem must not prevent other devices
-						// in this sweep from being checked.
-						slog.Error(
-							"device poll failed",
-							"device_id",
-							monitoredDevice.ID,
-							"error",
-							err,
-						)
-					}
-				}
-			}
+			scheduler.runPollDeviceWorker(ctx, deviceQueue)
 		}()
 	}
 
@@ -172,4 +132,52 @@ func (scheduler *MonitoringScheduler) pollActiveDevices(
 	}
 
 	return nil
+}
+
+func (scheduler *MonitoringScheduler) runPollDeviceWorker(
+	ctx context.Context,
+	deviceQueue <-chan *device.Device,
+) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+
+		case monitoredDevice, queueOpen := <-deviceQueue:
+			// Check if queue closed
+			if !queueOpen {
+				return
+			}
+
+			// Cancellation and queued work can become ready together.
+			if ctx.Err() != nil {
+				return
+			}
+
+			if monitoredDevice == nil {
+				slog.Error("active device list contains a nil device")
+				continue
+			}
+
+			_, err := scheduler.monitoringService.PollDevice(
+				ctx,
+				monitoredDevice.ID,
+			)
+			if err != nil {
+				// Cancellation is expected during shutdown, not a
+				// device failure to report as an error.
+				if ctx.Err() != nil {
+					return
+				}
+
+				// One device's problem must not prevent other devices
+				// in this sweep from being checked. So just log.
+				slog.Error(
+					"device poll failed",
+					"device_id", monitoredDevice.ID,
+					"error", err,
+				)
+			}
+		}
+	}
 }

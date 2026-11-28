@@ -108,6 +108,8 @@ func (deviceService *DeviceService) Create(
 
 	// The inventory row and its initial status must be created together.
 	// If either insert fails, neither should be left in the database.
+	// If rollback fails, return its error along with the original error.
+	// Clear createdDevice because the transaction did not complete successfully.
 	defer func() {
 		if rollbackErr := transaction.Rollback(); rollbackErr != nil &&
 			!errors.Is(rollbackErr, sql.ErrTxDone) {

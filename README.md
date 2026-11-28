@@ -170,6 +170,26 @@ Application errors have the form
   in the commands below.
 - Access to a container registry for the PostgreSQL, Go and Alpine images.
 
+### Platform notes
+
+The service has been tested on macOS. Windows and Linux setups have not been
+independently verified; the notes below describe prerequisites, not a claim of
+tested platform support.
+
+- **macOS:** Docker Desktop includes Docker Compose. With the Podman
+  alternative, initialize and start its VM as described above.
+- **Windows:** The documented commands use a POSIX-style shell (`cp -n`,
+  `export`, and Makefile shell recipes). Use WSL 2 with Go, Git, Make and curl
+  installed inside the Linux distribution, and enable Docker Desktop's WSL
+  integration for that distribution. Run the commands from its shell. Native
+  PowerShell does not use `export` or the same `cp -n` semantics.
+- **Linux:** Install Go, Git, Make and curl using your distribution's package
+  manager or the official Go installer. Install Docker Engine and its Compose
+  plugin using the [Docker Engine installation guide](https://docs.docker.com/engine/install/)
+  and [Compose plugin instructions](https://docs.docker.com/compose/install/linux/);
+  verify `docker compose version` works before starting the stack. Podman with
+  a compatible Compose provider is also an option.
+
 Clone the repository and prepare monitor configuration:
 
 ```sh
