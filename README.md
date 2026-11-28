@@ -14,9 +14,14 @@ real Ubiquiti devices or a real device checksum.
   history. The monitor applies embedded Goose migrations at startup.
 - **Device simulator:** provides HTTP discovery and REST diagnostics, with an
   optional gRPC diagnostics server. Configurable healthy, slow, flaky, error
-  and incomplete responses exercise monitoring behavior. A separate one-shot
-  checksum stub is invoked by the simulator; its demo SHA-256 checksum tests
-  process wiring, not a hardware algorithm. See [simulator scenarios](demo/README.md).
+  and incomplete responses exercise monitoring behavior; `FAILURE_COUNT`
+  controls the number of initial slow, flaky or error responses per endpoint.
+  A separate one-shot checksum stub is invoked by the simulator; its demo
+  SHA-256 checksum tests process wiring, not a hardware algorithm. See
+  [simulator scenarios](demo/README.md).
+- **Slow-response demo instance:** delays its first two health requests for
+  three seconds, beyond the monitor's default two-second attempt timeout, then
+  responds normally to demonstrate timeout and recovery.
 - **Interfaces:** the monitor exposes REST only. Devices expose HTTP
   `GET /health` for discovery, then REST diagnostics or gRPC `GetDiagnostics`.
   gRPC is a device-facing transport, not a monitor API. These simulator
@@ -246,7 +251,7 @@ do not hand-edit vendored files.
 
 ## Run from an empty database
 
-1. From the repository root, start PostgreSQL and the three simulator
+1. From the repository root, start PostgreSQL and the four simulator
    instances:
 
    ```sh
@@ -255,9 +260,10 @@ do not hand-edit vendored files.
 
    Leave this terminal open for logs. The stack publishes PostgreSQL on
    `127.0.0.1:5432`, healthy REST discovery on `127.0.0.1:8081`, flaky REST
-   discovery on `127.0.0.1:8082`, and gRPC simulator discovery on
-   `127.0.0.1:8083` with diagnostics on `127.0.0.1:9091`. No devices are
-   automatically registered with the monitor.
+   discovery on `127.0.0.1:8082`, gRPC simulator discovery on
+   `127.0.0.1:8083` with diagnostics on `127.0.0.1:9091`, and slow discovery
+   on `127.0.0.1:8084`. No devices are automatically registered with the
+   monitor.
 
 2. In another terminal, choose the same dependency mode as above and wait for
    PostgreSQL to be healthy:
@@ -310,6 +316,14 @@ do not hand-edit vendored files.
    `http://127.0.0.1:8083/health`; its discovery advertises both transports,
    so the monitor uses gRPC. The supplied target uses `127.0.0.1`, which
    matches the health URL host when the monitor runs on the host.
+
+   To observe a timeout and recovery, create a device with health URL
+   `http://127.0.0.1:8084/health`. Its first two health requests each wait
+   three seconds, exceeding the monitor's default two-second attempt timeout.
+   With one retry, both requests in the first poll cycle time out, so the
+   device becomes `degraded`. The scheduler's following sweep occurs after the
+   configured polling interval; it finds the simulator responding normally
+   and returns the status to `reachable`.
 
 5. To modify or retire the first device:
 

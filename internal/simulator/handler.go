@@ -27,8 +27,10 @@ func (b *endpointBehavior) allow(
 
 	switch b.mode {
 	case "error":
-		http.Error(w, "simulated device error", b.status)
-		return false
+		if requestNumber <= uint64(b.failures) {
+			http.Error(w, "simulated device error", b.status)
+			return false
+		}
 
 	case "flaky":
 		if requestNumber <= uint64(b.failures) {
@@ -37,9 +39,11 @@ func (b *endpointBehavior) allow(
 		}
 
 	case "slow":
-		if err := wait(r.Context(), b.delay); err != nil {
-			slog.Debug("simulated response canceled", "error", err)
-			return false
+		if requestNumber <= uint64(b.failures) {
+			if err := wait(r.Context(), b.delay); err != nil {
+				slog.Debug("simulated response canceled", "error", err)
+				return false
+			}
 		}
 	}
 
