@@ -47,10 +47,12 @@ func (server *grpcDiagnosticsServer) GetDiagnostics(
 		// Continue to build the diagnostics response.
 
 	case "error":
-		return nil, grpcstatus.Error(
-			codes.Unavailable,
-			"simulated device error",
-		)
+		if requestNumber <= uint64(server.config.FailureCount) {
+			return nil, grpcstatus.Error(
+				codes.Unavailable,
+				"simulated device error",
+			)
+		}
 
 	case "flaky":
 		if requestNumber <= uint64(server.config.FailureCount) {
@@ -61,8 +63,10 @@ func (server *grpcDiagnosticsServer) GetDiagnostics(
 		}
 
 	case "slow":
-		if err := wait(requestContext, server.config.ResponseDelay); err != nil {
-			return nil, grpcstatus.FromContextError(err).Err()
+		if requestNumber <= uint64(server.config.FailureCount) {
+			if err := wait(requestContext, server.config.ResponseDelay); err != nil {
+				return nil, grpcstatus.FromContextError(err).Err()
+			}
 		}
 
 	default:
